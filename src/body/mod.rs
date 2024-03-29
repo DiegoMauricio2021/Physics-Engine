@@ -36,9 +36,10 @@ impl Bodys {
     }
 }
 
+#[derive(Debug)]
 pub struct AABB{
-    max: Vec2,
-    min: Vec2,
+    pub max: Vec2,
+    pub min: Vec2,
 } 
 impl AABB{
     fn new(maxx: f32, maxy: f32, minx: f32, miny: f32) -> AABB{
@@ -156,7 +157,7 @@ impl std::default::Default for Shape {
 }
 
 impl Shape{
-    fn get_aabb(&self) -> AABB{
+    pub fn get_aabb(&self) -> AABB{
         match self.kind{
             Bodys::Circle(r) => {
                 let minx = self.pos.x - r;
@@ -171,22 +172,17 @@ impl Shape{
                 let mut miny = f32::MAX;
                 let mut maxy = f32::MIN;
                 for i in &self.vertices{
+                    let i = *i + self.pos;
                     maxx = maxx.max(i.x);
-                    maxy = maxx.max(i.y);
+                    maxy = maxy.max(i.y);
                     minx = minx.min(i.x);
-                    miny = minx.min(i.y);
+                    miny = miny.min(i.y);
                 }
                 AABB::new(maxx, maxy, minx, miny)
             },
         }
     }
 }
-
-#[allow(dead_code)]
-fn draw_vecs(gizmos: &mut Gizmos, pos: Vec2, vec: Vec2, color: Color) {
-    gizmos.ray_2d(pos, vec, color);
-}
-
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
 struct Vecs {}

@@ -16,6 +16,7 @@ const COLORS: [Color; 8] = [
     Color::AZURE,
     Color::YELLOW,
 ];
+const ITERATIONS: usize = 16;
 
 fn main() {
     App::new()
@@ -24,7 +25,7 @@ fn main() {
         .insert_resource(ClearColor(Color::rgb_u8(11, 187, 202)))
         .add_systems(Update, close_on_esc)
         .add_systems(Startup, setup)
-        .add_systems(FixedUpdate, (collisions, run, collisions).chain())
+        .add_systems(FixedUpdate, (run, collisions).chain())
         .add_systems(FixedUpdate, (moving, creating))
         .run();
 }
@@ -129,34 +130,56 @@ fn run(
 fn collisions(mut query: Query<&mut Shape>, mut gizmos: Gizmos) {
     let mut combinations = query.iter_combinations_mut();
     while let Some([mut a, mut b]) = combinations.fetch_next() {
-        let (normal, distance) = a.collision(b.pos, &b, &mut gizmos);
+        for _ in 0..ITERATIONS {
+            if a.is_static && b.is_static{
+                continue;
+            }
+            a.aabb = a.get_aabb();
+            b.aabb = b.get_aabb();
+            if a.checkaabb(&b){
+                continue;
+            }
+            
 
-        if a.is_static {
-            b.pos += normal * distance;
-        } else if b.is_static {
-            a.pos += -(normal * distance);
-        } else {
-            a.pos += -(normal * distance / 2.);
-            b.pos += normal * distance / 2.;
+            let (normal, distance) = a.collision(b.pos, &b, &mut gizmos);
+
+            if a.is_static {
+                b.pos += normal * distance;
+            } else if b.is_static {
+                a.pos += -(normal * distance);
+            } else {
+                a.pos += -(normal * distance / 2.);
+                b.pos += normal * distance / 2.;
+            }
+           
+            let (contact1, contact2, cc) = a.contactpoint(&b, &mut gizmos);
+            
+            let rel_vel = a.vel - b.vel;
+    
+            if rel_vel.dot(normal) == 0. {
+                continue;
+            }
+    
+            let e = f32::min(a.restitution, b.restitution);
+            let j = -(1. + e) * rel_vel.dot(normal);
+            let j = j / (a.inv_mass + b.inv_mass);
+    
+            let impulse = j * normal;
+    
+            let ainv = a.inv_mass;
+            let binv = b.inv_mass;
+    
+            a.vel += impulse * ainv;
+            b.vel -= impulse * binv;
+
+            if cc > 0 {
+                gizmos.rect_2d(contact1, 0., Vec2::ONE, Color::ORANGE); 
+                if cc > 1 {
+                    gizmos.rect_2d(contact2, 0., Vec2::ONE, Color::ORANGE); 
+                }
+            }
+            
         }
-
-        let rel_vel = a.vel - b.vel;
-
-        if rel_vel.dot(normal) == 0. {
-            continue;
-        }
-
-        let e = f32::min(a.restitution, b.restitution);
-        let j = -(1. + e) * rel_vel.dot(normal);
-        let j = j / (a.inv_mass + b.inv_mass);
-
-        let impulse = j * normal;
-
-        let ainv = a.inv_mass;
-        let binv = b.inv_mass;
-
-        a.vel += impulse * ainv;
-        b.vel -= impulse * binv;
     }
 }
 
@@ -171,8 +194,8 @@ fn setup(
     let r = 50.;
     let mut rng = thread_rng();
     create_body( &mut commands, &mut meshes, &mut materials, Bodys::Rec(r, r), Vec2::new(0., 0.), Color::GREEN, true, 1., false,);
-    create_body( &mut commands, &mut meshes, &mut materials, Bodys::Rec(1000., 100.), Vec2::new(50., 50.), Color::DARK_GREEN, false, 1., true,);
-    for i in 0..10 {
+    create_body( &mut commands, &mut meshes, &mut materials, Bodys::Rec(1000., 100.), Vec2::new(500., 50.), Color::DARK_GREEN, false, 1., true,);
+    /* for i in 0..10 {
         let shape = if i % 2 == 0 {
             Bodys::Rec(r, r)
         } else {
@@ -189,5 +212,5 @@ fn setup(
         };
 
         create_body( &mut commands, &mut meshes, &mut materials, shape, Vec2::new(x, y), color, false, 1., movil,);
-    }
+    } */
 }
