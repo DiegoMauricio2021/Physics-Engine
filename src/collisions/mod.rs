@@ -1,19 +1,30 @@
+use super::body::Bodys::*;
 use super::body::Shape;
-use super::body::Bodys::{Circle, Rec};
 use bevy::prelude::*;
 
+fn prox_equals_f32(a: f32, b: f32) -> bool {
+    (a > b && a - b < 0.1) || (a < b && a - b > -0.1)
+}
+
+fn prox_equals_vec2(a: Vec2, b: Vec2) -> bool {
+    prox_equals_f32(a.x, b.x) && prox_equals_f32(a.y, b.y)
+}
 
 impl Shape {
     pub fn collision(&self, pb: Vec2, shape: &Shape, mut gizmos: &mut Gizmos) -> (Vec2, f32) {
-        
         match (&self.kind, &shape.kind) {
             (Circle(ra), Circle(rb)) => self.cir_to_cir(*ra, *rb, pb),
-            (Rec(_, _), Rec(_, _)) => self.rec_to_rec(shape),
             (Rec(_, _), Circle(_)) => {
                 let (normal, depth) = Shape::rec_to_cir(&self, shape, &mut gizmos);
                 (-normal, depth)
-            },
-            _ => Shape::rec_to_cir(shape, &self, &mut gizmos),
+            }
+            (Poly(_, _), Circle(_)) => {
+                let (normal, depth) = Shape::rec_to_cir(&self, shape, &mut gizmos);
+                (-normal, depth)
+            }
+            (Circle(_), Rec(_, _)) => Shape::rec_to_cir(shape, &self, &mut gizmos),
+            (Circle(_), Poly(_, _)) => Shape::rec_to_cir(shape, &self, &mut gizmos),
+            _ => self.rec_to_rec(shape),
         }
     }
 
@@ -34,7 +45,8 @@ impl Shape {
     }
     pub fn rotate(&mut self, angle: f32) {
         match self.kind {
-            Rec(_, _) => {
+            Circle(_) => {}
+            _ => {
                 for i in &mut self.vertices {
                     let cos = angle.cos();
                     let sin = angle.sin();
@@ -43,7 +55,6 @@ impl Shape {
                     *i = Vec2::new(rx, ry);
                 }
             }
-            Circle(_) => {}
         }
     }
     fn cir_to_cir(&self, ra: f32, rb: f32, pb: Vec2) -> (Vec2, f32) {
@@ -87,7 +98,7 @@ impl Shape {
         if direction.dot(normal) < 0. {
             normal = -normal;
         }
-        
+
         for (i, _) in shape.vertices.iter().enumerate() {
             let va = &shape.vertices[i];
             let vb = &shape.vertices[(i + 1) % shape.vertices.len()];
@@ -144,7 +155,7 @@ impl Shape {
                 depth = axisdepth;
             }
         }
-        
+
         let cpindex = Shape::close_point(shape.pos, &slf.vertices, slf.pos);
         let axi = shape.pos - (slf.vertices[cpindex] + slf.pos);
         let (maxa, mina) = Shape::proyect_vecs(&slf.vertices, axi, slf.pos);
@@ -199,123 +210,111 @@ impl Shape {
         (max, min)
     }
 
-    pub fn checkaabb(&self, shape: &Shape) -> bool{
+    pub fn checkaabb(&self, shape: &Shape) -> bool {
         let (maxa, mina) = (self.aabb.max, self.aabb.min);
         let (maxb, minb) = (shape.aabb.max, shape.aabb.min);
 
-        maxa.x <=  minb.x ||  maxb.x <= mina.x || maxa.y <=  minb.y ||  maxb.y <= mina.y
+        maxa.x <= minb.x || maxb.x <= mina.x || maxa.y <= minb.y || maxb.y <= mina.y
     }
 
-    pub fn contactpoint(&self, shape: &Shape, gizmos: &mut Gizmos) -> (Vec2, Vec2, i32){
-        match (&self.kind, &shape.kind){
+    pub fn contactpoint(&self, shape: &Shape) -> (Vec2, Vec2, i32) {
+        match (&self.kind, &shape.kind) {
             (Circle(ra), Circle(_)) => {
                 let ab = self.pos - shape.pos;
                 let dir = ab.normalize_or_zero();
                 (self.pos - dir * *ra, Vec2::ZERO, 1)
             }
-            (Rec(_, _), Circle(_)) => {(Shape::point_rec_to_cir(self, shape), Vec2::ZERO, 1)},
-            (Circle(_), Rec(_, _)) => {(Shape::point_rec_to_cir(shape, self), Vec2::ZERO, 1)},
-            (Rec(_, _), Rec(_, _)) => {self.point_rec_to_rec(shape, gizmos)}
-            //_ => {(Vec2::ZERO, Vec2::ZERO, 0)},
+            (Rec(_, _), Circle(_)) => (Shape::point_rec_to_cir(self, shape), Vec2::ZERO, 1),
+            (Poly(_, _), Circle(_)) => (Shape::point_rec_to_cir(self, shape), Vec2::ZERO, 1),
+            (Circle(_), Poly(_, _)) => (Shape::point_rec_to_cir(shape, self), Vec2::ZERO, 1),
+            (Circle(_), Rec(_, _)) => (Shape::point_rec_to_cir(shape, self), Vec2::ZERO, 1),
+            _ => self.point_rec_to_rec(shape),
         }
-        
     }
 
-    fn point_rec_to_rec(&self, shape: &Shape, gizmos: &mut Gizmos) -> (Vec2, Vec2, i32){
+    fn point_rec_to_rec(&self, shape: &Shape) -> (Vec2, Vec2, i32) {
         let mut contact1 = Vec2::ZERO;
         let mut contact2 = Vec2::ZERO;
         let mut cc = 0;
         let mut min = f32::MAX;
-        
-        for p in &self.vertices{
+
+        for p in &self.vertices {
             let p = *p + self.pos;
-            for (i ,a) in shape.vertices.iter().enumerate(){
+            for (i, a) in shape.vertices.iter().enumerate() {
                 let va = *a + shape.pos;
-                let vb = shape.vertices[(i+1) % shape.vertices.len()] + shape.pos;
-                
-                let (distsq, cp) = Shape::point_segment(p, va, vb);
-                
-                let distsq = p.distance_squared(cp);
-                //gizmos.rect_2d(va, 0., Vec2::ONE, Color::ORANGE); 
-                
+                let vb = shape.vertices[(i + 1) % shape.vertices.len()] + shape.pos;
 
-                if distsq == min {
-                    if cp != contact1{
+                let (distsq, cp) = Shape::point_segment(p, va, vb);
+
+                if prox_equals_f32(distsq, min) {
+                    if !prox_equals_vec2(cp, contact1) {
                         cc = 2;
                         contact2 = cp;
                     }
-                }else if distsq < min{
+                } else if distsq < min {
                     min = distsq;
                     cc = 1;
                     contact1 = cp;
                 }
             }
         }
-        for p in &shape.vertices{
+        for p in &shape.vertices {
             let p = *p + shape.pos;
-            for (i ,a) in self.vertices.iter().enumerate(){
+            for (i, a) in self.vertices.iter().enumerate() {
                 let va = *a + self.pos;
-                let vb = self.vertices[(i+1) % self.vertices.len()] + self.pos;
-                
-                let (distsq, cp) = Shape::point_segment(p, va, vb);
-                let distsq = p.distance_squared(cp);
-                //gizmos.rect_2d(cp, 0., Vec2::ONE, Color::ORANGE); 
-                
+                let vb = self.vertices[(i + 1) % self.vertices.len()] + self.pos;
 
-                if distsq == min {
-                    if cp != contact1{
+                let (distsq, cp) = Shape::point_segment(p, va, vb);
+
+                if prox_equals_f32(distsq, min) {
+                    if !prox_equals_vec2(cp, contact1) {
                         cc = 2;
                         contact2 = cp;
                     }
-                }else if distsq < min{
+                } else if distsq < min {
                     min = distsq;
                     cc = 1;
                     contact1 = cp;
                 }
             }
         }
-//        println!("{}", cc);
         (contact1, contact2, cc)
     }
 
-    fn point_rec_to_cir(slf: &Shape, shape: &Shape) -> Vec2{
+    fn point_rec_to_cir(slf: &Shape, shape: &Shape) -> Vec2 {
         let mut min = f32::MAX;
         let mut cp = Vec2::ZERO;
-        for (i, v) in slf.vertices.iter().enumerate(){
+        for (i, v) in slf.vertices.iter().enumerate() {
             let va = *v + slf.pos;
-            let vb = slf.vertices[(i+1) % slf.vertices.len()] + slf.pos;
+            let vb = slf.vertices[(i + 1) % slf.vertices.len()] + slf.pos;
             let (distancesqr, contact) = Shape::point_segment(shape.pos, va, vb);
             if distancesqr < min {
                 min = distancesqr;
                 cp = contact;
             }
-            
         }
         cp
     }
-    fn point_segment(p: Vec2, a: Vec2, b:Vec2) -> (f32, Vec2) {
+    pub fn point_segment(p: Vec2, a: Vec2, b: Vec2) -> (f32, Vec2) {
         let ab = b - a;
         let ap = p - a;
         let proj = ap.dot(ab);
         let ablensqr = ab.length_squared();
         let d = proj / ablensqr;
         let contact;
-        if d <= 0.{
+        if d <= 0. {
             contact = a;
-        }else if d >= 1.{
+        } else if d >= 1. {
             contact = b;
-        }else {
+        } else {
             contact = a + ab * d
         }
         let distancesqr = p.distance_squared(contact);
-        (distancesqr, contact) 
+        (distancesqr, contact)
     }
 }
-
-
 
 #[allow(dead_code)]
 fn draw_vecs(gizmos: &mut Gizmos, pos: Vec2, vec: Vec2, color: Color) {
     gizmos.ray_2d(pos, vec, color);
 }
-
